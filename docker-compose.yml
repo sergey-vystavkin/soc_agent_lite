@@ -1,0 +1,55 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: soc_postgres
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app_password
+      POSTGRES_DB: app_db
+      # Initialize cluster with English-only C locale and UTF-8 encoding
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C --lc-messages=C"
+      # Ensure container environment uses English for client tools
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      LC_MESSAGES: C
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: soc_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  app:
+    image: alpine:3.19
+    container_name: soc_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["/bin/sh", "-c", "echo 'app pass'; tail -f /dev/null"]
+
+volumes:
+  postgres_data:
+  redis_data:
