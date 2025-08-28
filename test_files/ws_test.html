@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WS Incidents Test</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 20px; }
+  #log { white-space: pre-wrap; background: #111; color: #0f0; padding: 10px; border-radius: 6px; height: 60vh; overflow: auto; }
+  input, button { font-size: 14px; padding: 6px 10px; }
+</style>
+<h3>WebSocket: /ws/incidents/{incident_id}</h3>
+<div>
+  <label>incident_id: <input id="iid" placeholder="например, 42"></label>
+  <button id="connect">Connect</button>
+  <button id="ping" disabled>Send ping</button>
+</div>
+<pre id="log"></pre>
+<script>
+  const logEl = document.getElementById('log');
+  function log(line) {
+    logEl.textContent += line + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  let ws = null;
+
+  document.getElementById('connect').onclick = () => {
+    const id = document.getElementById('iid').value.trim();
+    if (!id) { alert('Введите incident_id'); return; }
+    if (ws) { ws.close(); ws = null; }
+
+    const url = `ws://127.0.0.1:8000/ws/incidents/${encodeURIComponent(id)}`;
+    log(`Connecting to ${url} ...`);
+    ws = new WebSocket(url);
+
+    ws.onopen = () => { log('WS OPEN'); document.getElementById('ping').disabled = false; };
+    ws.onmessage = (e) => log('RECV: ' + e.data);
+    ws.onclose = (e) => { log(`WS CLOSE code=${e.code} reason=${e.reason}`); document.getElementById('ping').disabled = true; };
+    ws.onerror = (e) => log('WS ERROR');
+  };
+
+  document.getElementById('ping').onclick = () => {
+    try { ws?.send('ping'); log('SEND: ping'); } catch (e) {}
+  };
+</script>

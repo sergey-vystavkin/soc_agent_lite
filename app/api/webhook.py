@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
+import asyncio
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel, Field
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.security.webhook_sign import verify_webhook_signature
 from app.services.idempotency import try_lock, body_hash
+from app.services.emitter import send_step
 from app.store.db import get_session
 from app.store.models import Incident, Action
 
@@ -25,9 +27,19 @@ class AlertIn(BaseModel):
         populate_by_name = True
 
 
+
+
 async def start_workflow(incident_id: int):
-    # Placeholder for actual workflow start logic
-    return
+    await asyncio.sleep(10)
+    await send_step(incident_id, "llm_plan", details={"status": "planning"})
+    await asyncio.sleep(10)
+    await send_step(incident_id, "run_query", details={"status": "running"})
+    await asyncio.sleep(10)
+    await send_step(incident_id, "capture_evidence", details={"status": "saving"})
+    await asyncio.sleep(10)
+    await send_step(incident_id, "ticket_saved", details={"status": "ok"})
+    await asyncio.sleep(10)
+    await send_step(incident_id, "done")
 
 
 @router.post("/webhook/siem")
@@ -51,6 +63,9 @@ async def webhook_siem(
     action = Action(incident_id=incident.id, kind="received_alert", payload_json=payload.model_dump(by_alias=True))
     session.add(action)
     await session.commit()
+
+    # Emit event to websocket listeners
+    await send_step(incident.id, "received_alert", alert=payload.model_dump(by_alias=True))
 
     background_tasks.add_task(start_workflow, incident.id)
 
