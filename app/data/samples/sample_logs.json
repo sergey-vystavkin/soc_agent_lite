@@ -1,0 +1,37 @@
+[
+  {
+    "timestamp": "2025-08-29T18:00:00Z",
+    "ip": "192.168.1.10",
+    "user": "alice",
+    "action": "login",
+    "status": "success"
+  },
+  {
+    "timestamp": "2025-08-29T18:05:00Z",
+    "ip": "10.0.0.5",
+    "user": "bob",
+    "action": "download",
+    "status": "success"
+  },
+  {
+    "timestamp": "2025-08-29T18:10:00Z",
+    "ip": "192.168.1.10",
+    "user": "alice",
+    "action": "logout",
+    "status": "success"
+  },
+  {
+    "timestamp": "2025-08-29T18:12:30Z",
+    "ip": "203.0.113.77",
+    "user": "charlie",
+    "action": "login",
+    "status": "failure"
+  },
+  {
+    "timestamp": "2025-08-29T18:15:00Z",
+    "ip": "10.0.0.5",
+    "user": "bob",
+    "action": "delete",
+    "status": "denied"
+  }
+]
