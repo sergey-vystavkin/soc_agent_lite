@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Dict, Set, Any
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 
 
 class IncidentWSManager:
@@ -34,7 +34,7 @@ class IncidentWSManager:
         for ws in conns:
             try:
                 await ws.send_json(message)
-            except Exception:
+            except (WebSocketDisconnect, RuntimeError):
                 to_remove.append(ws)
         if to_remove:
             async with self._lock:
