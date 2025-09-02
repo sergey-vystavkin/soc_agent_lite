@@ -13,6 +13,8 @@ from app.services.workflow import start_workflow
 from app.store.db import get_session
 from app.store.models import Incident, Action
 
+from app.observability import webhook_incoming_counter
+
 router = APIRouter()
 
 
@@ -38,6 +40,9 @@ async def webhook_siem(
     session: AsyncSession = Depends(get_session),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
 ):
+    # Increment custom metric for incoming webhook
+    webhook_incoming_counter.labels(endpoint="/webhook/siem").inc()
+
     raw_body = await request.body()
     key = idempotency_key or body_hash(raw_body or b"null")
     if not try_lock(key, ttl=300):

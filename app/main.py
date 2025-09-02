@@ -8,8 +8,12 @@ from app.api.health import router as health_router
 from app.api.webhook import router as webhook_router
 from app.api.ws import router as ws_router
 from app.api.incidents import router as incidents_router
+from app.observability import setup_instrumentation
 
 app = FastAPI()
+
+# Setup observability (/metrics)
+setup_instrumentation(app)
 
 # Routers
 app.include_router(health_router)
