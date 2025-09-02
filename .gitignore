@@ -9,6 +9,7 @@ __pycache__/
 venv/
 ENV/
 env/
+evidence/
 
 # Distribution / packaging
 .Python

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
 
@@ -9,7 +9,12 @@ from app.services.emitter import send_step
 from app.services.llm_client import get_llm_client, Alert, Findings, Step
 from app.services import log_query
 from app.store.db import SessionLocal
-from app.store.models import Incident, Action, Ticket
+from app.store.models import Incident, Action, Ticket, Evidence
+from datetime import datetime
+import os
+import hashlib
+from playwright.async_api import async_playwright
+from app.services.ticketing import create_ticket as create_demo_ticket
 
 
 async def _get_received_alert_payload(incident_id: int) -> Dict[str, Any]:
@@ -49,21 +54,78 @@ async def _mark_incident_status(incident_id: int, status: str) -> None:
         await session.commit()
 
 
-async def _create_ticket_and_log(incident_id: int, ticket_data: Dict[str, Any]) -> Dict[str, Any]:
+
+
+
+
+async def capture_evidence(incident_id: int, url: Optional[str]) -> List[Dict[str, Any]]:
+    """Capture webpage evidence using Playwright.
+
+    - Launch headless Chromium.
+    - goto(url) if provided; otherwise a blank page.
+    - Save screenshot to evidence/INC-{incident_id}-{ts}.png.
+    - Compute sha256 and write a DB Evidence record.
+    - Save PDF and tracing/HAR alongside screenshot.
+
+    Returns a dict with file paths and hash for telemetry.
+    """
+    # Prepare dirs and filenames
+    
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
+    base_dir = os.path.join(os.getcwd(), "evidence")
+    os.makedirs(base_dir, exist_ok=True)
+    base_name = f"INC-{incident_id}-{ts}"
+
+    screenshot_path = os.path.join(base_dir, f"{base_name}.png")
+    pdf_path = os.path.join(base_dir, f"{base_name}.pdf")
+    trace_zip = os.path.join(base_dir, f"{base_name}-trace.zip")
+    har_path = os.path.join(base_dir, f"{base_name}.har")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(record_har_path=har_path)
+        await context.tracing.start(screenshots=True, snapshots=True, sources=True)
+        page = await context.new_page()
+        target = url or "about:blank"
+        await page.goto(target, wait_until="networkidle")
+        await page.screenshot(path=screenshot_path, full_page=True)
+        try:
+            await page.pdf(path=pdf_path)
+        except Exception:
+            # PDF may fail on non-Chromium implementations or about:blank; ignore
+            pdf_path = None
+        await context.tracing.stop(path=trace_zip)
+        await context.close()
+        await browser.close()
+
+    # Compute SHA256 for screenshot
+    sha256_hex = None
+    try:
+        h = hashlib.sha256()
+        with open(screenshot_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                h.update(chunk)
+        sha256_hex = h.hexdigest()
+    except Exception:
+        sha256_hex = None
+
+    # Persist Evidence record for screenshot (primary artifact)
     async with SessionLocal() as session:
-        t = Ticket(
-            incident_id=incident_id,
-            external_id=ticket_data["external_id"],
-            system=ticket_data["system"],
-            status=ticket_data["status"],
-        )
-        session.add(t)
-        await session.flush()
-        action = Action(incident_id=incident_id, kind="create_ticket", payload_json={"ticket": ticket_data})
-        session.add(action)
+        ev = Evidence(incident_id=incident_id, kind="screenshot", path=screenshot_path, hash=sha256_hex)
+        session.add(ev)
         await session.flush()
         await session.commit()
-        return ticket_data
+
+    result_dict: Dict[str, Any] = {
+        "screenshot": screenshot_path,
+        "pdf": pdf_path,
+        "trace": trace_zip,
+        "har": har_path,
+        "sha256": sha256_hex,
+        "url": url,
+    }
+
+    return [result_dict]
 
 
 async def start_workflow(incident_id: int) -> None:
@@ -136,21 +198,31 @@ async def start_workflow(incident_id: int) -> None:
                     await send_step(incident_id, "run_query", **payload)
 
                 elif kind == "capture_evidence":
-                    payload = {"step": {"kind": kind, "params": params}, "status": "noop"}
+                    # Execute Playwright to capture evidence from URL (if provided)
+                    url = (params or {}).get("url")
+                    try:
+                        result = await capture_evidence(incident_id, url)
+                        findings.extend(result)
+                        payload = {"step": {"kind": kind, "params": params}, "status": "ok", "results": result, "result_count": len(result)}
+                    except Exception as ce:
+                        payload = {"step": {"kind": kind, "params": params}, "status": "error", "error": str(ce)}
                     await _add_action(incident_id, "capture_evidence", payload)
                     await send_step(incident_id, "capture_evidence", **payload)
 
                 elif kind == "create_ticket":
-                    ticket_data = {
-                        "external_id": f"TCK-{incident_id}-{int(asyncio.get_event_loop().time()*1000)}",
-                        "system": "local",
-                        "status": "open",
-                    }
-                    saved = await _create_ticket_and_log(incident_id, ticket_data)
+                    # Create ticket in demo system and persist
+                    t = await create_demo_ticket(incident_id, findings=findings, evidence=None)
+                    saved = {"external_id": t.external_id, "system": t.system, "status": t.status}
+                    # Log action for traceability
+                    await _add_action(incident_id, "create_ticket", {"ticket": saved})
+                    # add to findings as a dict with type metadata
+                    findings.append({"type": "ticket", **saved})
                     await send_step(incident_id, "create_ticket", ticket=saved)
 
                 else:
                     payload = {"step": {"kind": kind, "params": params}, "status": "skipped_unknown"}
+                    # record unknown step occurrence into findings for completeness
+                    findings.append({"type": "unknown_step", "kind": kind, "params": params, "status": "skipped_unknown"})
                     await _add_action(incident_id, kind, payload)
                     await send_step(incident_id, kind, **payload)
 
