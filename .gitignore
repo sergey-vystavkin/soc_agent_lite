@@ -10,6 +10,7 @@ venv/
 ENV/
 env/
 evidence/
+trace/
 
 # Distribution / packaging
 .Python
