@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.services.connectors import external_call, ExternalCallError
+from app.api.schemas import HealthOut
 
 router = APIRouter()
 
@@ -12,9 +13,9 @@ def _failing_external() -> str:
     raise RuntimeError("forced failure for testing")
 
 
-@router.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+@router.get("/health", response_model=HealthOut)
+def health() -> HealthOut:
+    return HealthOut(status="ok")
 
 
 @router.get("/test-external")

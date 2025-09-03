@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel, Field
+from app.api.schemas import WebhookResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.security.webhook_sign import verify_webhook_signature
@@ -31,7 +32,7 @@ class AlertIn(BaseModel):
 
 
 
-@router.post("/webhook/siem")
+@router.post("/webhook/siem", response_model=WebhookResponse)
 async def webhook_siem(
     request: Request,
     payload: AlertIn,
@@ -61,4 +62,4 @@ async def webhook_siem(
 
     background_tasks.add_task(start_workflow, incident.id)
 
-    return {"incident_id": incident.id}
+    return WebhookResponse(incident_id=incident.id)
