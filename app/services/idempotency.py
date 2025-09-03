@@ -26,6 +26,7 @@ load_dotenv()
 
 # Read Redis configuration strictly from environment (.env or process env)
 # Do not embed cloud credentials in code.
+REDIS_URL = os.getenv("REDIS_URL")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_USERNAME = os.getenv("REDIS_USERNAME") or None
@@ -37,7 +38,10 @@ REDIS_TLS = os.getenv("REDIS_TLS", "false").lower() in ("1", "true", "yes")
 def _get_redis_client() -> redis.Redis:
     """Create a Redis client configured via env vars.
     Using decode_responses=True to work with strings conveniently.
+    Prefer REDIS_URL if provided; fallback to discrete params.
     """
+    if REDIS_URL:
+        return redis.from_url(REDIS_URL, decode_responses=True)
     return redis.Redis(
         host=REDIS_HOST,
         port=REDIS_PORT,

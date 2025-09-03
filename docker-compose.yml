@@ -8,9 +8,7 @@ services:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app_password
       POSTGRES_DB: app_db
-      # Initialize cluster with English-only C locale and UTF-8 encoding
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C --lc-messages=C"
-      # Ensure container environment uses English for client tools
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       LC_MESSAGES: C
@@ -41,14 +39,25 @@ services:
       start_period: 5s
 
   app:
-    image: alpine:3.19
+    build: .
+    image: soc_agent_lite:latest
     container_name: soc_app
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: ["/bin/sh", "-c", "echo 'app pass'; tail -f /dev/null"]
+    environment:
+      # Async SQLAlchemy DSN
+      DATABASE_URL: postgresql+asyncpg://app:app_password@postgres:5432/app_db
+      # Provide both REDIS_URL and discrete vars for compatibility
+      REDIS_URL: redis://redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      WEBHOOK_SECRET: change-me-please
+    ports:
+      - "8000:8000"
 
 volumes:
   postgres_data:

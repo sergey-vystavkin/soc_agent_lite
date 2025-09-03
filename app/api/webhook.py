@@ -4,6 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel, Field
+from sqlalchemy import exc as sa_exc
 from app.api.schemas import WebhookResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,13 +50,18 @@ async def webhook_siem(
     if not try_lock(key, ttl=300):
         raise HTTPException(status_code=409, detail={"message": "Duplicate webhook", "key": key})
 
-    incident = Incident(source=payload.source, status="received", summary=None)
-    session.add(incident)
-    await session.flush()  # to get incident.id
+    try:
+        incident = Incident(source=payload.source, status="received", summary=None)
+        session.add(incident)
+        await session.flush()  # to get incident.id
 
-    action = Action(incident_id=incident.id, kind="received_alert", payload_json=payload.model_dump(by_alias=True))
-    session.add(action)
-    await session.commit()
+        action = Action(incident_id=incident.id, kind="received_alert", payload_json=payload.model_dump(by_alias=True))
+        session.add(action)
+        await session.commit()
+    except sa_exc.IntegrityError as e:
+        await session.rollback()
+        # Return 400 instead of 500 for any DB constraint violation (test DB is permissive)
+        raise HTTPException(status_code=400, detail={"message": "Invalid data rejected by database constraint", "error": str(e)})
 
     # Emit event to websocket listeners
     await send_step(incident.id, "received_alert", alert=payload.model_dump(by_alias=True))
