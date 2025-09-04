@@ -13,6 +13,7 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(100), nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow, nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="new")
@@ -25,6 +26,7 @@ class Incident(Base):
     __table_args__ = (
         Index("ix_incidents_created_at", "created_at"),
         Index("ix_incidents_status", "status"),
+        Index("ix_incidents_tenant_id", "tenant_id"),
     )
 
 

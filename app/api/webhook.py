@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
+import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, BackgroundTasks
 from pydantic import BaseModel, Field
@@ -41,6 +42,7 @@ async def webhook_siem(
     _=Depends(verify_webhook_signature),
     session: AsyncSession = Depends(get_session),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    tenant_id: str = Header(alias="X-Tenant"),
 ):
     # Increment custom metric for incoming webhook
     webhook_incoming_counter.labels(endpoint="/webhook/siem").inc()
@@ -50,8 +52,15 @@ async def webhook_siem(
     if not try_lock(key, ttl=300):
         raise HTTPException(status_code=409, detail={"message": "Duplicate webhook", "key": key})
 
+    # Validate tenant as UUID format
     try:
-        incident = Incident(source=payload.source, status="received", summary=None)
+        parsed = uuid.UUID(tenant_id)
+        tenant_id = str(parsed)
+    except Exception:
+        raise HTTPException(status_code=400, detail={"message": "Invalid X-Tenant header; expected UUID"})
+
+    try:
+        incident = Incident(source=payload.source, status="received", summary=None, tenant_id=tenant_id)
         session.add(incident)
         await session.flush()  # to get incident.id
 

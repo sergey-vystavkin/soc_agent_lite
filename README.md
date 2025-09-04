@@ -20,6 +20,7 @@ This repository is suitable for local development and containerized deployment. 
   - Incidents REST API: /api/v1/incidents
   - WebSocket: /api/v1/ws/incidents/{incident_id}
 - Webhook signature verification via HMAC-SHA256 header X-Signature
+- Multi-tenancy header X-Tenant enforced for write/read of incidents (see RLS section)
 - Database migrations with Alembic
 - Redis-backed idempotency helper to deduplicate requests
 - Observability: Prometheus metrics mounted at /metrics
@@ -95,10 +96,15 @@ body = b'{"hello":"world"}'
 print(sign_bytes(body, secret=b"your-secret"))  # prints 'sha256=<hex>'
 
 Example (curl):
-curl -X POST http://localhost:8000/api/v1/webhook \
+curl -X POST http://localhost:8000/api/v1/webhook/siem \
   -H "Content-Type: application/json" \
   -H "X-Signature: sha256=<hex>" \
-  -d '{"hello":"world"}'
+  -H "X-Tenant: 11111111-2222-3333-4444-555555555555" \
+  -d '{"source":"demo","type":"alert","severity":"high","entity":"srv-1","raw":{}}'
+
+GET incident (tenant-filtered):
+curl -s http://localhost:8000/api/v1/incidents/1 \
+  -H "X-Tenant: 11111111-2222-3333-4444-555555555555"
 
 ## WebSocket test
 A simple test page is provided: test_files/ws_test.html
@@ -108,6 +114,50 @@ A simple test page is provided: test_files/ws_test.html
 - Create a new revision: alembic revision -m "message"
 - Autogenerate changes (ensure models are imported in alembic/env.py): alembic revision --autogenerate -m "message"
 - Apply latest: alembic upgrade head
+
+## Multi-tenancy and Row-Level Security (RLS)
+This project is prepared for multi-tenant data isolation.
+
+What is implemented in code:
+- incidents table now has a mandatory tenant_id (UUID string) column.
+- POST /api/v1/webhook/siem requires header X-Tenant and persists it into incidents. The header should contain a UUID (with or without dashes).
+- GET /api/v1/incidents/{incident_id} requires header X-Tenant and only returns the incident if it belongs to that tenant.
+
+Recommended Postgres RLS configuration:
+1) Enable RLS on the incidents table and create a tenant policy using a session parameter app.tenant_id:
+
+   ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
+   CREATE POLICY tenant_isolation ON incidents
+     USING (tenant_id = current_setting('app.tenant_id')::uuid);
+
+2) Ensure tenant_id column type in Postgres is uuid. If you started with varchar(36) (default in initial code), you can migrate to uuid:
+
+   ALTER TABLE incidents ALTER COLUMN tenant_id TYPE uuid USING tenant_id::uuid;
+   CREATE INDEX IF NOT EXISTS ix_incidents_tenant_id ON incidents(tenant_id);
+
+3) Set the session parameter for each request/connection in the application layer. Example using SQLAlchemy (async):
+
+   from starlette.middleware.base import BaseHTTPMiddleware
+   from sqlalchemy import text
+
+   class TenantMiddleware(BaseHTTPMiddleware):
+       async def dispatch(self, request, call_next):
+           tenant = request.headers.get('X-Tenant')
+           response = await call_next(request)
+           return response
+
+   # When creating a session/connection for a request:
+   async with engine.connect() as conn:
+       await conn.execute(text("SET app.tenant_id = :tid"), {"tid": tenant})
+
+   # Or, set per-session after acquiring AsyncSession:
+   await session.execute(text("SET app.tenant_id = :tid"), {"tid": tenant})
+
+4) With RLS enabled and app.tenant_id set, Postgres will automatically restrict SELECT/INSERT/UPDATE/DELETE to rows where tenant_id matches the session setting.
+
+Notes:
+- Your app should validate that X-Tenant is a UUID and propagate it consistently.
+- For cross-table enforcement (actions/evidence/tickets), you can either rely on application-level joins from incidents or extend schema to embed tenant_id and add additional RLS policies if those tables become directly queryable by clients.
 
 ## Troubleshooting
 - Error: DATABASE_URL is not set. Define it in .env (or pass via env var) using asyncpg driver.

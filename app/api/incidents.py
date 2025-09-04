@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from app.api.schemas import IncidentOut, ActionOut, EvidenceOut, TicketOut, Pagination
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,8 +19,10 @@ async def get_incident(
     session: AsyncSession = Depends(get_session),
     limit: int = Query(20, ge=0, le=200, description="Max number of actions to return"),
     offset: int = Query(0, ge=0, description="Number of actions to skip"),
+    tenant_id: str = Header(alias="X-Tenant"),
 ) -> IncidentOut:
-    res = await session.execute(select(Incident).where(Incident.id == incident_id))
+    # Restrict by tenant
+    res = await session.execute(select(Incident).where(Incident.id == incident_id, Incident.tenant_id == tenant_id))
     inc: Optional[Incident] = res.scalar_one_or_none()
     if not inc:
         raise HTTPException(status_code=404, detail="Incident not found")
